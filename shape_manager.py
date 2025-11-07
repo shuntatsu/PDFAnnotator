@@ -3,9 +3,7 @@ import uuid
 import math
 from utils_geometry import point_in_triangle, dist_point_to_segment
 
-# =====================================================
-# ShapeManager 本体
-# =====================================================
+
 class ShapeManager:
     def __init__(self, app):
         self.app = app
@@ -16,21 +14,23 @@ class ShapeManager:
         self.active_handle = None
 
     # =====================================================
-    # 追加された append_shape
+    # 図形追加
     # =====================================================
     def append_shape(self, s):
-        """図形をページに追加し再描画"""
+        """図形をページに追加して再描画"""
+        s.setdefault("color", "black")
         self.app.shapes_by_page.setdefault(self.app.page_index, []).append(s)
         self.app.display_page(highlight_shape=s)
 
     # =====================================================
-    # 図形描画・ハイライト
+    # 図形描画
     # =====================================================
     def draw_shape(self, s, highlight=False):
         t = s["type"]
         cv = self.app.canvas
-        color = s.get("color", "black")
+        color = s.get("color", self.app.current_color)
         width = 3 if highlight else 2
+        scale = self.app.scale
 
         if t == "rect":
             x1, y1 = self.app.pdf_to_canvas(s["x"], s["y"])
@@ -61,12 +61,43 @@ class ShapeManager:
 
         elif t == "text":
             x, y = self.app.pdf_to_canvas(s["x"], s["y"])
-            cv.create_text(x, y, anchor="nw", text=s["text"], fill="black", font=("Arial", 14))
+            size = max(10, int(14 * scale))
+            cv.create_text(x, y, anchor="nw", text=s["text"], fill=color, font=("Arial", size))
             if highlight:
-                self._draw_rect_handles(x, y, x + 60, y + 25)
+                self._draw_rect_handles(x, y, x + 60 * scale, y + 25 * scale)
 
     # =====================================================
-    # ハンドル描画（各形状）
+    # 計算式を同色で追加（図形近くに配置）
+    # =====================================================
+    def create_formula_text(self, s, text, color):
+        t = s["type"]
+        app = self.app
+
+        # --- テキストの配置位置を図形タイプ別に決定 ---
+        if t == "triangle":
+            pts = s["points"]
+            avg_x = sum(x for x, _ in pts) / 3
+            avg_y = sum(y for _, y in pts) / 3 - 20
+            tx, ty = avg_x, avg_y
+        elif t == "line":
+            tx = (s["x1"] + s["x2"]) / 2
+            ty = (s["y1"] + s["y2"]) / 2 - 10
+        else:
+            tx = s.get("x", 0) + s.get("w", 60)
+            ty = s.get("y", 0) - 15
+
+        t_text = {
+            "id": str(uuid.uuid4()),
+            "type": "text",
+            "x": tx,
+            "y": ty,
+            "text": text,
+            "color": color,
+        }
+        self.append_shape(t_text)
+
+    # =====================================================
+    # ハンドル描画（各形状タイプごと）
     # =====================================================
     def _draw_handle(self, x, y, shape, idx):
         cv = self.app.canvas
@@ -97,13 +128,34 @@ class ShapeManager:
     # ハンドル検出
     # =====================================================
     def detect_handle(self, cx, cy):
-        for hid, shape, idx in self.handle_targets:
-            x1, y1, x2, y2 = self.app.canvas.coords(hid)
+        """クリック位置(cx, cy)がハンドル上か判定"""
+        if not hasattr(self, "handles_ids") or not self.handles_ids:
+            return False
+
+        valid_handles = []
+        for hid in self.handles_ids:
+            coords = self.app.canvas.coords(hid)
+            if len(coords) == 4:  # 有効なハンドルのみ
+                valid_handles.append(hid)
+        self.handles_ids = valid_handles
+
+        shape = getattr(self.app, "selected_shape", None)
+        if not shape:
+            return False
+
+        for idx, hid in enumerate(self.handles_ids):
+            coords = self.app.canvas.coords(hid)
+            if len(coords) != 4:
+                continue
+            x1, y1, x2, y2 = coords
             if x1 <= cx <= x2 and y1 <= cy <= y2:
                 self.active_handle = (shape, idx)
                 return True
         return False
 
+    # =====================================================
+    # ハンドル削除
+    # =====================================================
     def clear_handles(self):
         for hid in self.handles_ids:
             self.app.canvas.delete(hid)
@@ -138,14 +190,14 @@ class ShapeManager:
 
         elif t == "ellipse":
             x, y, w, h = shape["x"], shape["y"], shape["w"], shape["h"]
-            if idx == 0:  # 上
+            if idx == 0:
                 shape["y"] = py
                 shape["h"] = (y + h) - py
-            elif idx == 1:  # 右
+            elif idx == 1:
                 shape["w"] = px - x
-            elif idx == 2:  # 下
+            elif idx == 2:
                 shape["h"] = py - y
-            elif idx == 3:  # 左
+            elif idx == 3:
                 shape["x"] = px
                 shape["w"] = (x + w) - px
 
@@ -161,11 +213,12 @@ class ShapeManager:
         self.app.display_page(highlight_shape=shape)
 
     # =====================================================
-    # 図形検出
+    # 図形クリック検出（選択判定）
     # =====================================================
     def find_shape(self, cx, cy):
         for s in reversed(self.app.shapes_by_page.get(self.app.page_index, [])):
             t = s["type"]
+
             if t == "rect":
                 x1, y1 = self.app.pdf_to_canvas(s["x"], s["y"])
                 x2, y2 = self.app.pdf_to_canvas(s["x"] + s["w"], s["y"] + s["h"])
@@ -182,7 +235,7 @@ class ShapeManager:
                 x2, y2 = self.app.pdf_to_canvas(s["x"] + s["w"], s["y"] + s["h"])
                 cx0, cy0 = (x1 + x2) / 2, (y1 + y2) / 2
                 rx, ry = abs(x2 - x1) / 2, abs(y2 - y1) / 2
-                d = ((cx - cx0)**2) / (rx**2) + ((cy - cy0)**2) / (ry**2)
+                d = ((cx - cx0) ** 2) / (rx ** 2) + ((cy - cy0) ** 2) / (ry ** 2)
                 if abs(d - 1.0) < 0.05:
                     return s, "edge"
                 if d < 1.0:
@@ -206,17 +259,18 @@ class ShapeManager:
 
             elif t == "text":
                 x, y = self.app.pdf_to_canvas(s["x"], s["y"])
-                if abs(cx - x) < 60 and abs(cy - y) < 25:
+                size = 14 * self.app.scale
+                if abs(cx - x) < 60 * self.app.scale and abs(cy - y) < 25 * self.app.scale:
                     return s, "inside"
 
         return None, None
-    # ----------------------------
+
+    # =====================================================
     # 三角形プレビュー
-    # ----------------------------
+    # =====================================================
     def show_triangle_preview(self, cx, cy):
-        """三角形作成中に予測線を描画"""
+        """三角形作成中に予測線を表示"""
         cv = self.app.canvas
-        # 既存プレビュー削除
         for pid in self.tri_preview_ids:
             cv.delete(pid)
         self.tri_preview_ids.clear()
@@ -224,50 +278,11 @@ class ShapeManager:
         pts = self.triangle_points
         if len(pts) >= 1:
             x1, y1 = pts[-1]
-            self.tri_preview_ids.append(cv.create_line(x1, y1, cx, cy, fill="orange", dash=(4, 2), width=2))
+            self.tri_preview_ids.append(
+                cv.create_line(x1, y1, cx, cy, fill="orange", dash=(4, 2), width=2)
+            )
         if len(pts) == 2:
             x0, y0 = pts[0]
-            self.tri_preview_ids.append(cv.create_line(x0, y0, cx, cy, fill="orange", dash=(4, 2), width=2))
-
-    def finalize_triangle(self):
-        """三角形確定"""
-        if len(self.triangle_points) == 3:
-            pts_pdf = [self.app.canvas_to_pdf(x, y) for x, y in self.triangle_points]
-            s = {"id": str(uuid.uuid4()), "type": "triangle", "points": pts_pdf}
-            self.append_shape(s)
-        # リセット
-        for pid in self.tri_preview_ids:
-            self.app.canvas.delete(pid)
-        self.tri_preview_ids.clear()
-        self.triangle_points.clear()
-        
-    # =====================================================
-    # ハンドル削除  
-    # =====================================================
-    def detect_handle(self, cx, cy):
-        """クリック位置(cx,cy)がハンドルに近いか判定"""
-        if not hasattr(self, "handles_ids") or not self.handles_ids:
-            return False
-
-        valid_handles = []
-        for hid in self.handles_ids:
-            coords = self.app.canvas.coords(hid)
-            if len(coords) == 4:  # 有効なハンドルだけ
-                valid_handles.append(hid)
-        self.handles_ids = valid_handles
-
-        # shapeを確実に取得（前回選択状態を参照）
-        shape = getattr(self.app, "selected_shape", None)
-        if not shape:
-            return False
-
-        for idx, hid in enumerate(self.handles_ids):
-            coords = self.app.canvas.coords(hid)
-            if len(coords) != 4:
-                continue
-            x1, y1, x2, y2 = coords
-            if x1 <= cx <= x2 and y1 <= cy <= y2:
-                self.active_handle = (shape, idx)
-                return True
-
-        return False
+            self.tri_preview_ids.append(
+                cv.create_line(x0, y0, cx, cy, fill="orange", dash=(4, 2), width=2)
+            )

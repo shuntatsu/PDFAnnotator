@@ -2,7 +2,7 @@
 import uuid
 import math
 from utils_geometry import point_in_triangle, dist_point_to_segment
-
+from math_eval import MathEvalError, eval_and_truncate_3
 
 class ShapeManager:
     def __init__(self, app):
@@ -12,12 +12,14 @@ class ShapeManager:
         self.handles_ids = []
         self.handle_targets = []
         self.active_handle = None
+        self.shapes = [] 
 
     # =====================================================
     # 図形追加
     # =====================================================
     def append_shape(self, s):
         """図形をページに追加して再描画"""
+        self.update_shape_value(s)
         s.setdefault("color", "black")
         self.app.shapes_by_page.setdefault(self.app.page_index, []).append(s)
         self.app.display_page(highlight_shape=s)
@@ -226,6 +228,7 @@ class ShapeManager:
             shape["points"][idx] = (px, py)
 
         self.app.display_page(highlight_shape=shape)
+        self.app.shapes.update_shape_value(shape)
 
     # =====================================================
     # 図形クリック検出（選択判定）
@@ -301,3 +304,144 @@ class ShapeManager:
             self.tri_preview_ids.append(
                 cv.create_line(x0, y0, cx, cy, fill="orange", dash=(4, 2), width=2)
             )
+
+    # =====================================================
+    # value（面積・長さ・計算結果）を更新する汎用関数（完全版）
+    # =====================================================
+    def update_shape_value(self, s):
+        if not s:
+            return
+
+        t = s.get("type")
+
+        # -------------------------------------------
+        # 図形タイプが text 以外で、
+        # ユーザー入力で value を固定している場合は上書きしない
+        # （手入力した寸法・面積を尊重する）
+        # -------------------------------------------
+        if t != "text" and s.get("manual_value"):
+            return
+
+        # ===========================
+        #  TEXT（数式評価もここで統一）
+        # ===========================
+        if t == "text":
+            raw = s.get("text", "")
+            if raw is None:
+                s["value"] = None
+                return
+
+            raw = raw.strip()
+            if raw == "":
+                s["value"] = None
+                return
+
+            # "= のついた式は表示形式（例: '5+3=' → '5+3=8'）
+            if raw.endswith("="):
+                expr = raw[:-1]
+                try:
+                    val = eval_and_truncate_3(expr)
+                    # 表示を常に正しい計算式に更新
+                    s["text"] = f"{expr}={val}"
+                    s["value"] = val
+                except MathEvalError:
+                    # 表示はそのまま、value だけ None
+                    s["value"] = None
+                return
+
+            # "= なしの純粋な式"
+            try:
+                val = eval_and_truncate_3(raw)
+                # 表示を計算結果にそろえる
+                s["text"] = str(val)
+                s["value"] = val
+            except MathEvalError:
+                # 数式でない → 単なるメモ扱い
+                s["value"] = None
+
+            return
+
+        # ===========================
+        #  RECT（面積）
+        # ===========================
+        if t == "rect":
+            w = abs(s.get("w", 0))
+            h = abs(s.get("h", 0))
+            area = w * h
+            s["value"] = round(area, 5)
+            return
+
+        # ===========================
+        #  ELLIPSE（円/楕円の面積）
+        # ===========================
+        if t == "ellipse":
+            w = abs(s.get("w", 0))
+            h = abs(s.get("h", 0))
+            r1 = w / 2
+            r2 = h / 2
+            area = math.pi * r1 * r2
+            s["value"] = round(area, 5)
+            return
+
+        # ===========================
+        #  LINE（長さ）
+        # ===========================
+        if t == "line":
+            x1, y1 = s.get("x1"), s.get("y1")
+            x2, y2 = s.get("x2"), s.get("y2")
+
+            if None in (x1, y1, x2, y2):
+                s["value"] = None
+                return
+
+            dx = x2 - x1
+            dy = y2 - y1
+            length = math.sqrt(dx * dx + dy * dy)
+            s["value"] = round(length, 5)
+            return
+
+        # ===========================
+        #  TRIANGLE（三角形の3点）
+        # ===========================
+        if t == "triangle":
+            pts = s.get("points")
+            if not pts or len(pts) != 3:
+                s["value"] = None
+                return
+
+            try:
+                (x1, y1), (x2, y2), (x3, y3) = pts
+                area = abs(
+                    (x1 * (y2 - y3)
+                     + x2 * (y3 - y1)
+                     + x3 * (y1 - y2)) / 2.0
+                )
+                s["value"] = round(area, 5)
+            except Exception:
+                s["value"] = None
+            return
+
+        # ===========================
+        #  フォールバック（メモなど）
+        # ===========================
+        s["value"] = None
+
+    def get_slope_factor(self, s, page_index=None):
+        """屋根の倍率を返す。shape 個別設定 > ページデフォルト > 1.0"""
+        if not s:
+            return 1.0
+
+        # shape 個別設定があれば優先
+        slope = s.get("slope")
+        if slope is not None:
+            return slope
+
+        # ページデフォルト
+        if page_index is None:
+            # 呼び出し元からページ指定が無いときは、現在ページを使う
+            page = self.app.page_index
+        else:
+            page = page_index
+
+        return self.app.page_slope_default.get(page, 1.0)
+

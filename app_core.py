@@ -1,13 +1,13 @@
-# app_core.py
 import tkinter as tk
 from PIL import ImageTk
-from tkinter import filedialog, messagebox
+from tkinter import filedialog, messagebox, simpledialog
 import json
 from ui_toolbar import UIToolbar
 from pdf_manager import PDFManager
 from shape_manager import ShapeManager
-from event_handlers import EventHandlers
-
+from event_handlers import EventHandlers, NumericInputDialog
+import math_eval
+import math
 
 class PDFAnnotator:
     def __init__(self, root):
@@ -27,6 +27,8 @@ class PDFAnnotator:
         self.active_button = None
         self.selected_shape = None
         self.shapes_by_page = {}
+        self.slope_presets = []   # [1.021, 1.05, ...] 過去に作った倍率記録
+        self.page_slope_default = {} 
 
         # ====== Manager群 ======
         self.pdf = PDFManager(self)
@@ -78,6 +80,22 @@ class PDFAnnotator:
         # ページラベル更新
         self.page_label.config(text=f"Page {self.page_index+1} / {len(self.doc)}")
 
+        totals, formulas = self.calc_page_stats(self.page_index)
+
+        txt = "\n".join(formulas)
+
+        cx = 40
+        cy = self.canvas.winfo_height() - (len(formulas) * 16) - 20
+
+        self.canvas.create_text(
+            cx,
+            cy,
+            anchor="nw",
+            text=txt,
+            fill="#333333",
+            font=("Arial", 14)
+        )
+
     # ======================================================
     # ファイル操作
     # ======================================================
@@ -112,7 +130,10 @@ class PDFAnnotator:
         with open(path, "r", encoding="utf-8") as f:
             data = json.load(f)
         self.pdf_path = data["pdf_path"]
-        self.shapes_by_page = data["shapes_by_page"]
+
+        raw = data.get("shapes_by_page", {})
+        self.shapes_by_page = {int(k): v for k, v in raw.items()}
+
         self.pdf.open_pdf(self.pdf_path)
         self.set_status(f"Project loaded: {path}")
         self.display_page()
@@ -236,3 +257,137 @@ class PDFAnnotator:
 
     def pdf_to_canvas(self, px, py):
         return px * self.scale + self.offset_x, py * self.scale + self.offset_y
+    
+    def add_new_slope_dialog(self):
+        # H と B を一気に聞く（既存の NumericInputDialog を再利用）
+        dlg = NumericInputDialog(self.root, "屋根倍率の計算", ["高さ H", "底 B"])
+        vals = getattr(dlg, "result", {}) or {}
+
+        H = vals.get("高さ H")
+        B = vals.get("底 B")
+
+        # キャンセル or 入力不正
+        if H is None or B is None:
+            return
+
+        try:
+            raw = math.sqrt(H * H + B * B) / B
+            slope = math_eval.truncate_3(raw)  # 4.2325 → 4.232 みたいな切り捨て
+        except Exception:
+            messagebox.showerror("エラー", "正しい数値を入力してください")
+            return
+
+        # プリセットに保存（重複は追加しない）
+        if slope not in self.slope_presets:
+            self.slope_presets.append(slope)
+            self.slope_presets.sort()
+
+        # UI 更新
+        self.update_slope_combo()
+
+        # 選択中 shape が屋根なら個別倍率
+        s = self.selected_shape
+        if s and s.get("color") == "#0000ff":  # 屋根色
+            s["slope"] = slope
+        else:
+            # ページデフォルト
+            self.page_slope_default[self.page_index] = slope
+
+        self.display_page()
+
+    def update_slope_combo(self):
+        items = [f"{v:.3f}" for v in self.slope_presets]
+        self.ui.slope_combo["values"] = items
+
+        # 現在のページデフォルトを表示
+        current = self.page_slope_default.get(self.page_index, None)
+        if current:
+            self.ui.slope_combo.set(f"{current:.3f}")
+        else:
+            self.ui.slope_combo.set("")
+
+    def calc_page_stats(self, page_index):
+        """ページ内の図形を集計し、数値と式の情報を返す"""
+        shapes = self.shapes_by_page.get(page_index, [])
+
+        # 色 → 属性名
+        ATTR = {
+            "#ff0000": "wall",
+            "#0000ff": "roof",
+            "#00aa00": "bshita",
+            "#ffa500": "koya",
+            "#800080": "window",
+            "#999999": "door",
+        }
+
+        # 集計値
+        totals = {k: 0.0 for k in ["wall", "roof", "bshita", "koya", "window", "door"]}
+
+        # 式一覧（右下に描く用）
+        formula_lines = []
+
+        for s in shapes:
+            col = s.get("color")
+            val = s.get("value")
+
+            if col not in ATTR or val is None:
+                continue
+
+            atr = ATTR[col]
+
+            # --- 屋根だけは倍率をかける ---
+            if atr == "roof":
+                slope = self.shapes.get_slope_factor(s)
+                result = val * slope
+                totals["roof"] += result
+                formula_lines.append(f"屋根: {val:.3f} × {slope:.3f} = {result:.3f}")
+            else:
+                totals[atr] += val
+                formula_lines.append(f"{atr}: {val:.3f}")
+
+        # --- 壁は窓・ドアを引く ---
+        wall_final = totals["wall"] - (totals["window"] + totals["door"])
+        formula_lines.append(
+            f"壁最終: {totals['wall']:.3f} - ({totals['window']:.3f} + {totals['door']:.3f}) = {wall_final:.3f}"
+        )
+        totals["wall_final"] = wall_final
+
+        return totals, formula_lines
+
+    def calc_total_stats(self):
+        pages = sorted(self.shapes_by_page.keys())
+
+        grand = {
+            "wall_final": 0.0,
+            "roof": 0.0,
+            "bshita": 0.0,
+            "koya": 0.0,
+            "window": 0.0,
+            "door": 0.0,
+        }
+
+        all_formulas = []
+
+        for p in pages:
+            totals, formulas = self.calc_page_stats(p)
+            if not formulas:
+                continue
+            all_formulas.append(f"=== Page {p+1} ===")
+            all_formulas.extend(formulas)
+
+            for k in grand:
+                if k in totals:
+                    grand[k] += totals[k]
+
+        return grand, all_formulas
+
+    def show_total_stats_dialog(self):
+        total, formulas = self.calc_total_stats()
+
+        txt = "\n".join(formulas)
+        txt += "\n\n=== 総合集計 ===\n"
+
+        for k, v in total.items():
+            txt += f"{k}: {v:.3f}\n"
+
+        messagebox.showinfo("総合集計", txt)

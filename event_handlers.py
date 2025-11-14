@@ -1,7 +1,7 @@
 import uuid
 import tkinter as tk
 from tkinter import simpledialog
-
+from math_eval import MathEvalError, eval_and_truncate_3, eval_expr, truncate_3
 
 # =====================================================
 # 数値入力フォーム（複数項目対応・Enter/Esc対応）
@@ -35,7 +35,9 @@ class NumericInputDialog(simpledialog.Dialog):
             self.result = {}
         for k, e in self.entries.items():
             try:
-                self.result[k] = float(e.get())
+                v = eval_expr(e.get())
+                v = truncate_3(v)
+                self.result[k] = v
             except ValueError:
                 self.result[k] = None
 
@@ -157,18 +159,52 @@ class EventHandlers:
                         self.triangle_first_line_id = None
 
             elif t == "text":
+                # PDF 座標
                 px, py = app.canvas_to_pdf(cx, cy)
-                txt = simpledialog.askstring("テキスト入力", "内容を入力してください:", initialvalue="")
-                if txt:
-                    s = {
-                        "id": str(uuid.uuid4()),
-                        "type": "text",
-                        "x": px,
-                        "y": py,
-                        "text": txt,
-                        "color": app.current_color,
-                    }
+
+                # --- 作成時に入力を要求 ---
+                raw = simpledialog.askstring("テキスト入力", "内容を入力してください:", initialvalue="")
+                if raw is None:
+                    return  # キャンセル時は作らない
+
+                raw = raw.strip()
+
+                # --- 数式処理（=付き or 通常式 or 単なる文字）---
+                value = None
+                new_text = raw
+
+                # ① "= のついた式"
+                if raw.endswith("="):
+                    expr = raw[:-1]
+                    try:
+                        val = eval_and_truncate_3(expr)
+                        new_text = f"{expr}={val}"
+                        value = val
+                    except MathEvalError:
+                        value = None
+
+                # ② "= なしの純粋な式"
+                else:
+                    try:
+                        val = eval_and_truncate_3(raw)
+                        new_text = str(val)
+                        value = val
+                    except MathEvalError:
+                        value = None
+
+                # --- 図形として登録 ---
+                s = {
+                    "id": str(uuid.uuid4()),
+                    "type": "text",
+                    "x": px,
+                    "y": py,
+                    "text": new_text,
+                    "value": value,
+                    "color": app.current_color,
+                }
                 app.shapes.append_shape(s)
+                app.display_page()
+
 
         # ========================================
         # Moveモード：図形・PDF移動など
@@ -203,7 +239,11 @@ class EventHandlers:
             vals = getattr(dlg, "result", {}) or {}
             w, h = vals.get("幅"), vals.get("高さ")
             if w and h:
-                formula = f"{w:.2f} × {h:.2f} = {w*h:.2f}"
+                area = w * h
+                formula = f"{w:.2f} × {h:.2f} = {area:.2f}"
+                # ★ 元図形の value もユーザー入力の面積で固定
+                s["value"] = area
+                s["manual_value"] = True
 
         elif t == "ellipse":
             dlg = NumericInputDialog(app.root, "円の寸法入力", ["半径"])
@@ -212,6 +252,8 @@ class EventHandlers:
             if r:
                 area = 3.14 * r * r
                 formula = f"3.14×{r:.2f}×{r:.2f} = {area:.2f}"
+                s["value"] = area
+                s["manual_value"] = True
 
         elif t == "triangle":
             dlg = NumericInputDialog(app.root, "三角形の寸法入力", ["底辺", "高さ"])
@@ -220,6 +262,8 @@ class EventHandlers:
             if base and h:
                 area = base * h / 2
                 formula = f"({base:.2f}×{h:.2f})/2 = {area:.2f}"
+                s["value"] = area
+                s["manual_value"] = True
 
         if formula:
             print("Generated formula:", formula)
@@ -330,10 +374,47 @@ class EventHandlers:
     # ダブルクリック（テキスト編集）
     # =====================================================
     def on_double_click(self, e):
+        from math_eval import eval_and_truncate_3, MathEvalError
+
         cx, cy = e.x, e.y
         s, _ = self.app.shapes.find_shape(cx, cy)
-        if s and s["type"] == "text":
-            new = simpledialog.askstring("編集", "新しいテキスト:", initialvalue=s["text"])
-            if new:
-                s["text"] = new
-                self.app.display_page()
+
+        if not s or s["type"] != "text":
+            return  # テキスト以外 or ヒットなし
+
+        # --- 編集ダイアログ ---
+        new = simpledialog.askstring("編集", "新しいテキスト:", initialvalue=s["text"])
+        if new is None:
+            return  # キャンセル
+
+        raw = new.strip()
+        value = None
+        new_text = raw
+
+        # --- "= のついた式" ---
+        if raw.endswith("="):
+            expr = raw[:-1]
+            try:
+                val = eval_and_truncate_3(expr)
+                new_text = f"{expr}={val}"
+                value = val
+            except MathEvalError:
+                value = None
+
+        # --- "=なしの式" ---
+        else:
+            try:
+                val = eval_and_truncate_3(raw)
+                new_text = str(val)
+                value = val
+            except MathEvalError:
+                value = None
+
+        # --- 保存 ---
+        s["text"] = new_text
+        s["value"] = value
+
+        # 念のため shape_manager の統一関数も呼んで良い
+        self.app.shapes.update_shape_value(s)
+
+        self.app.display_page()

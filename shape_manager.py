@@ -277,8 +277,21 @@ class ShapeManager:
 
             elif t == "text":
                 x, y = self.app.pdf_to_canvas(s["x"], s["y"])
-                size = 14 * self.app.scale
-                if abs(cx - x) < 60 * self.app.scale and abs(cy - y) < 25 * self.app.scale:
+                size = int(14 * self.app.scale)
+
+                # 1) 仮の text を描いて bbox を取得
+                tid = self.app.canvas.create_text(
+                    x, y,
+                    anchor="nw",
+                    text=s["text"],
+                    font=("Arial", size),
+                    fill=s.get("color", "black"),
+                )
+                x1, y1, x2, y2 = self.app.canvas.bbox(tid)
+                self.app.canvas.delete(tid)
+
+                # 2) クリック座標が bbox に入っていればヒット
+                if x1 <= cx <= x2 and y1 <= cy <= y2:
                     return s, "inside"
 
         return None, None

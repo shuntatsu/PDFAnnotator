@@ -19,8 +19,13 @@ class UIToolbar:
         tk.Button(file_frame, text="Open", command=self.app.open_pdf_dialog).pack(side=tk.LEFT, padx=2)
         tk.Button(file_frame, text="Save JSON", command=self.app.save_project_dialog).pack(side=tk.LEFT, padx=2)
         tk.Button(file_frame, text="Load JSON", command=self.app.load_project_dialog).pack(side=tk.LEFT, padx=2)
-        tk.Button(file_frame, text="Export PDF", command=self.app.export_pdf_dialog).pack(side=tk.LEFT, padx=2)
-        tk.Button(file_frame, text="総合集計", command=self.app.show_total_stats_dialog).pack(side=tk.LEFT, padx=2)
+        tk.Button(file_frame, text="PDF", command=self.app.export_pdf_dialog).pack(side=tk.LEFT, padx=2)
+        tk.Button(file_frame, text="集計", command=self.app.run_total_and_page_summary).pack(side=tk.LEFT, padx=2)
+        tk.Button(
+            file_frame,
+            text="全ページ集計",
+            command=self.app.run_total_and_all_page_summary
+        ).pack(side=tk.LEFT, padx=2)
 
         # ==== ページ操作 ====
         nav_frame = tk.Frame(tb, bg="#f0f0f0")

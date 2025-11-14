@@ -391,3 +391,59 @@ class PDFAnnotator:
             txt += f"{k}: {v:.3f}\n"
 
         messagebox.showinfo("総合集計", txt)
+
+    # ======================================================
+    # ページ集計テキストを追加（壁ページのみ）
+    # ======================================================
+    def add_summary_text_to_page(self, page_index=None):
+        """calc_page_stats の結果をページに text 図形として追加する（壁ページのみ）"""
+        import uuid
+
+        if page_index is None:
+            page_index = self.page_index
+
+        totals, formulas = self.calc_page_stats(page_index)
+
+        # 壁の合計が 0 なら壁ページではない → 何もしない
+        if totals["wall"] == 0:
+            return
+
+        # まとめ文字列
+        txt = "\n".join(formulas)
+
+        # キャンバス高さ取得（適当な右下）
+        self.root.update_idletasks()
+        canvas_h = self.canvas.winfo_height() or 800
+
+        cx = 40
+        cy = canvas_h - (len(formulas) * 16) - 20
+        px, py = self.canvas_to_pdf(cx, cy)
+
+        shape = {
+            "id": str(uuid.uuid4()),
+            "type": "text",
+            "x": px,
+            "y": py,
+            "text": txt,
+            "color": "#333333",
+            "summary": True,
+        }
+
+        self.shapes_by_page.setdefault(page_index, []).append(shape)
+
+        if page_index == self.page_index:
+            self.display_page()
+
+    # ======================================================
+    # 総合集計＋ページ集計テキスト表示
+    # ======================================================
+    def run_total_and_page_summary(self):
+        """総合集計ダイアログ→現在ページに壁ページ集計textを置く"""
+        self.show_total_stats_dialog()
+        self.add_summary_text_to_page()
+
+    def run_total_and_all_page_summary(self):
+        """総合集計＋全ページに壁ページ集計テキストを追加"""
+        self.show_total_stats_dialog()
+        for p in sorted(self.shapes_by_page.keys()):
+            self.add_summary_text_to_page(p)

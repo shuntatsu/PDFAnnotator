@@ -156,6 +156,20 @@ class EventHandlers:
                         app.canvas.delete(self.triangle_first_line_id)
                         self.triangle_first_line_id = None
 
+            elif t == "text":
+                px, py = app.canvas_to_pdf(cx, cy)
+                txt = simpledialog.askstring("テキスト入力", "内容を入力してください:", initialvalue="")
+                if txt:
+                    s = {
+                        "id": str(uuid.uuid4()),
+                        "type": "text",
+                        "x": px,
+                        "y": py,
+                        "text": txt,
+                        "color": app.current_color,
+                    }
+                app.shapes.append_shape(s)
+
         # ========================================
         # Moveモード：図形・PDF移動など
         # ========================================

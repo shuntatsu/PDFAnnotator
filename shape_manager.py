@@ -63,23 +63,23 @@ class ShapeManager:
             x, y = self.app.pdf_to_canvas(s["x"], s["y"])
             size = max(10, int(14 * scale))
 
-        tid = cv.create_text(
-            x, y, anchor="nw",
-            text=s["text"],
-            fill=color,
-            font=("Arial", size)
-        )
+            tid = cv.create_text(
+                x, y, anchor="nw",
+                text=s["text"],
+                fill=color,
+                font=("Arial", size)
+            )
 
-        # --- 選択時だけハンドルつきの枠を描く ---
-        if highlight:
-            # テキストの実際の矩形領域を取得
-            x1, y1, x2, y2 = cv.bbox(tid)
+            # --- 選択時だけハンドルつきの枠を描く ---
+            if highlight:
+                # テキストの実際の矩形領域を取得
+                x1, y1, x2, y2 = cv.bbox(tid)
 
-            # 枠線を描く
-            cv.create_rectangle(x1, y1, x2, y2, outline=color, width=2)
+                # 枠線を描く
+                cv.create_rectangle(x1, y1, x2, y2, outline=color, width=2)
 
-            # ハンドル（四隅）
-            self._draw_rect_handles(x1, y1, x2, y2)
+                # ハンドル（四隅）
+                self._draw_rect_handles(x1, y1, x2, y2)
 
     # =====================================================
     # 計算式を同色で追加（図形近くに配置）

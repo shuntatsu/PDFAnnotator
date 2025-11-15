@@ -403,13 +403,13 @@ class PDFAnnotator:
             page_index = self.page_index
 
         totals, formulas = self.calc_page_stats(page_index)
+        
+        # === ここが printf 形式の文字列 ===
+        txt = self.build_summary_string(totals, formulas, page_index)
 
-        # 壁の合計が 0 なら壁ページではない → 何もしない
-        if totals["wall"] == 0:
-            return
-
-        # まとめ文字列
-        txt = "\n".join(formulas)
+        print("\n===== Page Summary (printf 出力) =====")
+        print(txt)
+        print("=====================================\n")
 
         # キャンバス高さ取得（適当な右下）
         self.root.update_idletasks()
@@ -447,3 +447,28 @@ class PDFAnnotator:
         self.show_total_stats_dialog()
         for p in sorted(self.shapes_by_page.keys()):
             self.add_summary_text_to_page(p)
+
+    def build_summary_string(self, totals, formulas, page_index):
+        """ページ集計結果を printf 風に読みやすい文字列に整形"""
+        lines = []
+        lines.append(f"[Page {page_index+1} 集計]")
+        lines.append("")
+
+        # 個別式（フォーミュラ）
+        for f in formulas:
+            lines.append(f)
+
+        # 空行
+        lines.append("")
+
+        # 壁最終（printf 風）
+        wall = totals["wall"]
+        win  = totals["window"]
+        door = totals["door"]
+        wall_final = totals["wall_final"]
+
+        lines.append("壁 有効面積 = 壁 −（ドア＋窓）")
+        lines.append(f"             = {wall:.3f} − ({door:.3f} + {win:.3f})")
+        lines.append(f"             = {wall_final:.3f}")
+
+        return "\n".join(lines)

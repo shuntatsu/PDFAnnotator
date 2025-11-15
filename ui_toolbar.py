@@ -159,5 +159,4 @@ class UIToolbar:
         else:
             self.app.page_slope_default[page] = value
 
-        self.app.recalculate_page(page)
         self.app.display_page()

@@ -1,7 +1,7 @@
 # ui_toolbar.py
 import tkinter as tk
+from tkinter import ttk
 from tkinter import filedialog, messagebox, colorchooser
-
 
 class UIToolbar:
     def __init__(self, app):
@@ -19,18 +19,24 @@ class UIToolbar:
         tk.Button(file_frame, text="Open", command=self.app.open_pdf_dialog).pack(side=tk.LEFT, padx=2)
         tk.Button(file_frame, text="Save JSON", command=self.app.save_project_dialog).pack(side=tk.LEFT, padx=2)
         tk.Button(file_frame, text="Load JSON", command=self.app.load_project_dialog).pack(side=tk.LEFT, padx=2)
-        tk.Button(file_frame, text="Export PDF", command=self.app.export_pdf_dialog).pack(side=tk.LEFT, padx=2)
+        tk.Button(file_frame, text="PDF", command=self.app.export_pdf_dialog).pack(side=tk.LEFT, padx=2)
+        tk.Button(file_frame, text="集計", command=self.app.run_total_and_page_summary).pack(side=tk.LEFT, padx=2)
+        tk.Button(
+            file_frame,
+            text="全ページ集計",
+            command=self.app.run_total_and_all_page_summary
+        ).pack(side=tk.LEFT, padx=2)
 
         # ==== ページ操作 ====
         nav_frame = tk.Frame(tb, bg="#f0f0f0")
-        nav_frame.pack(side=tk.LEFT, padx=15)
+        nav_frame.pack(side=tk.LEFT, padx=5)
         tk.Label(nav_frame, text="📘 Page:", bg="#f0f0f0").pack(side=tk.LEFT)
         tk.Button(nav_frame, text="◀ Prev", command=self.app.prev_page).pack(side=tk.LEFT, padx=2)
         tk.Button(nav_frame, text="Next ▶", command=self.app.next_page).pack(side=tk.LEFT, padx=2)
 
         # ==== モード切り替え ====
         mode_frame = tk.Frame(tb, bg="#f0f0f0")
-        mode_frame.pack(side=tk.LEFT, padx=15)
+        mode_frame.pack(side=tk.LEFT, padx=5)
         tk.Label(mode_frame, text="🛠 Mode:", bg="#f0f0f0").pack(side=tk.LEFT)
         self.app.btn_move = tk.Button(mode_frame, text="Move", command=lambda: self.app.toggle_mode(self.app.btn_move, "move"))
         self.app.btn_draw = tk.Button(mode_frame, text="Draw", command=lambda: self.app.toggle_mode(self.app.btn_draw, "draw"))
@@ -39,7 +45,7 @@ class UIToolbar:
 
         # ==== 図形ボタン ====
         shape_frame = tk.Frame(tb, bg="#f0f0f0")
-        shape_frame.pack(side=tk.LEFT, padx=15)
+        shape_frame.pack(side=tk.LEFT, padx=5)
         tk.Label(shape_frame, text="Shape:", bg="#f0f0f0").pack(side=tk.LEFT)
         self.app.shape_buttons = {}
         for text, name in [
@@ -94,7 +100,7 @@ class UIToolbar:
 
         # ==== 拡大縮小 ====
         zoom_frame = tk.Frame(tb, bg="#f0f0f0")
-        zoom_frame.pack(side=tk.RIGHT, padx=10)
+        zoom_frame.pack(side=tk.RIGHT, padx=5)
         tk.Label(zoom_frame, text="🔍 Zoom:", bg="#f0f0f0").pack(side=tk.LEFT)
         tk.Button(zoom_frame, text="+", command=self.app.zoom_in, width=3).pack(side=tk.LEFT, padx=2)
         tk.Button(zoom_frame, text="-", command=self.app.zoom_out, width=3).pack(side=tk.LEFT, padx=2)
@@ -102,6 +108,28 @@ class UIToolbar:
         # ==== ステータスバー ====
         self.app.status = tk.Label(root, text="No PDF loaded", anchor="w", bg="#eaeaea", relief="sunken")
         self.app.status.pack(side=tk.BOTTOM, fill=tk.X)
+
+        # ==== 屋根倍率プリセット UI ====
+        slope_frame = tk.Frame(tb, bg="#f0f0f0")
+        slope_frame.pack(side=tk.LEFT, padx=5)
+
+        tk.Label(slope_frame, text="屋根倍率:", bg="#f0f0f0").pack(side=tk.LEFT)
+
+        # combobox（過去の倍率リストを表示する）
+        self.slope_combo = ttk.Combobox(
+            slope_frame, width=6, state="readonly"
+        )
+        self.slope_combo.pack(side=tk.LEFT, padx=3)
+
+        # + ボタン（新規倍率追加）
+        tk.Button(
+            slope_frame,
+            text="+",
+            width=2,
+            command=self.app.add_new_slope_dialog
+        ).pack(side=tk.LEFT)
+
+        self.bind_slope_events()
 
     # =====================================================
     # 色切り替え・カスタムカラー選択
@@ -117,3 +145,18 @@ class UIToolbar:
         if color_code and color_code[1]:
             self.app.current_color = color_code[1]
             self.app.color_preview.config(bg=color_code[1])
+
+    def bind_slope_events(self):
+        self.slope_combo.bind("<<ComboboxSelected>>", self.on_slope_selected)
+
+    def on_slope_selected(self, event):
+        value = float(self.slope_combo.get())
+        page = self.app.page_index
+
+        s = self.app.selected_shape
+        if s and s.get("color") == "#0000ff":  # 屋根
+            s["slope"] = value
+        else:
+            self.app.page_slope_default[page] = value
+
+        self.app.display_page()
